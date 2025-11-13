@@ -267,7 +267,7 @@ class LL1:
                 while i <= len(r_candidate) - 1:  # 遍历当前 右部候选式
                     if r_candidate[i] == vn:  # ch == Vn
                         if i + 1 == len(r_candidate):  # 如果是最后一个字符  >>>>>  S->....V
-                            self.follow[vn].add('#')
+                            # self.follow[vn].add('#')
                             break
                         else:  # 后面还有字符  >>>>> S->...V..
                             while i != len(r_candidate):
@@ -482,6 +482,8 @@ class LL1:
 
 
 if __name__ == "__main__":
+    # 注意使用无空格的测试用例（前端处理空白）
+
     grammar1 = [  # abb、abcbcbcbb等等
         "E->abA|aB|abB|cd|cf",
         "A->cbA|b",
@@ -513,9 +515,20 @@ if __name__ == "__main__":
         "Q->Rb|b",
         "R->Sa|a",
     ]
-    ll1 = LL1(grammar5)
+    grammar10 = [
+        'S->Aa',
+        'A->BD',
+        'B->b',
+        'D->d'
+    ]
+    ll1 = LL1(grammar10)
     ll1.init()
 
     analyse_str = "i+i*i"
     analyse_str = "bc"
     ll1.solve(analyse_str)
+    print(ll1.formulas_dict)
+    print(ll1.first)
+    print(ll1.follow)
+
+

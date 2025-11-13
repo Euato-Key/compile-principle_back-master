@@ -183,7 +183,7 @@ class FirstAndFollow:
                 while i <= len(r_candidate) - 1:  # 遍历当前 右部候选式
                     if r_candidate[i] == vn:  # ch == Vn
                         if i + 1 == len(r_candidate):  # 如果是最后一个字符  >>>>>  S->....V
-                            self.follow[vn].add('#')
+                            # self.follow[vn].add('#')
                             break
                         else:  # 后面还有字符  >>>>> S->...V..
                             while i != len(r_candidate):
@@ -405,7 +405,7 @@ class LR0:
 
     def print_DFA(self, all_DFA):
         for dfa in all_DFA:
-            print("====")
+            print("====================")
             print(f"id={dfa.id_}")
             print(f"item={dfa.pros_}")
             print(f"next={dfa.next_ids_} \n")
@@ -429,8 +429,8 @@ class LR0:
                     dot.edge(str(dfa.id_), str(to_id), label=v, fontcolor='red')
         # 显示图形
         # dot.view()
-        print(dot.source)
-        print(type(dot.source))
+        # print(dot.source)
+        # print(type(dot.source))
         return dot.source
 
     def step5_check_LR0(self, all_DFA):  # 判断是否为LR0文法
@@ -580,7 +580,7 @@ class LR0:
         self.S, self.Vn, self.Vt, self.formulas_list = self.step1_pre_process(self.formulas_list)
         self.dot_items = self.step2_all_dot_pros(self.formulas_list)  # 计算所有项目（带点）
         self.all_DFA = self.step3_construct_LR0_DFA(self.dot_items)  # 计算项目集的DFA转换关系
-        # self.print_DFA(self.all_DFA)
+        self.print_DFA(self.all_DFA)
         self.dot = self.step4_draw_DFA(self.all_DFA) # 画项目集的DFA转换图
         self.isLR0 = self.step5_check_LR0(self.all_DFA)
         if self.isLR0:  # 检测是否符合SLR1文法
@@ -591,11 +591,12 @@ class LR0:
 
 
 if __name__ == "__main__":
+    # 注意使用无空格的测试用例（前端处理空白）
     grammar1 = [  # ＋
         "E->E+T|T",
         "T->(E)|a",
     ]
-    grammar2 = [  # ppt上
+    grammar2 = [  # ppt上·
         "S->BB",
         "B->aB",
         "B->b"
@@ -629,8 +630,19 @@ if __name__ == "__main__":
         "S->abcA|bcA|cA",
         "A->abcA|ε"
     ]
-    lr0 = LR0(grammar2)
+    grammar7 = [  # 含ε， 移进归约冲突
+        "A->a|c|d|c|e|f|g|h|i|j|k|m"
+    ]
+    grammar10 = [
+        'S->Aa',
+        'A->BD',
+        'B->b',
+        'D->d'
+    ]
+
+    lr0 = LR0(grammar10)
     lr0.init()
+    print(lr0.f)
     # lr0.analyse_str("a+a+(a+a)") # 1
     # lr0.analyse_str("bc") # 5
     lr0.solve("bcabc")  # 6/7

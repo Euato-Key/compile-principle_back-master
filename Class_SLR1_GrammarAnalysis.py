@@ -91,8 +91,8 @@ class FirstAndFollow:
     def cal_all_first(self):  # ！！！！！！！！！只计算非终结符的first集！！！！！！！！
         for vn in self.formulas_dict.keys():
             self.cal_v_first(vn)
-        for vt in self.Vt:
-            self.cal_v_first(vt)
+        # for vt in self.Vt:
+        #     self.cal_v_first(vt)
         self.cal_v_first('ε')
 
     # def: 计算Follow集合1——考虑 添加first(Vn后一个非终结符)/{ε}， 而 不考虑 添加follow(left)
@@ -106,7 +106,7 @@ class FirstAndFollow:
                 while i <= len(r_candidate) - 1:  # 遍历当前 右部候选式
                     if r_candidate[i] == vn:  # ch == Vn
                         if i + 1 == len(r_candidate):  # 如果是最后一个字符  >>>>>  S->....V
-                            self.follow[vn].add('#')
+                            # self.follow[vn].add('#')
                             break
                         else:  # 后面还有字符  >>>>> S->...V..
                             while i != len(r_candidate):
@@ -423,7 +423,7 @@ class SLR1:
                     pro_left, pro_right = pro.split("->")
                     for ch in self.follow[pro_left]:
                         actions[(id_, ch)] = "r" + str(formulas_list.index(pro))
-                    actions[(id_, "#")] = "r" + str(formulas_list.index(pro))
+                    # actions[(id_, "#")] = "r" + str(formulas_list.index(pro))
             else:  # 有指向下一个项目，同时当前项目可能存在接受项目、归约项目（点在末尾）、移进项目
                 for item in dfa.pros_:
                     pro_left, pro_right = item.split(".")
@@ -518,8 +518,8 @@ class SLR1:
             info_msg.append(msg)
 
         # print
-        # for i in range(len(info_step)):
-        #     print(f"{info_step[i]}\t{info_state_stack[i]}\t{info_symbol_stack[i]}\t{info_str[i]}\t{info_msg[i]}\n")
+        for i in range(len(info_step)):
+            print(f"{info_step[i]}\t{info_state_stack[i]}\t{info_symbol_stack[i]}\t{info_str[i]}\t{info_msg[i]}\n")
 
         info = {
             "info_step": info_step,
@@ -547,6 +547,8 @@ class SLR1:
 
 
 if __name__ == "__main__":
+    # 注意使用无空格的测试用例（前端处理空白）
+
     grammar2 = [  # ppt上
         "S->BB",
         "B->aB",
@@ -586,9 +588,22 @@ if __name__ == "__main__":
         'S->bA',
         'A->aSc'
     ]
-    slr1 = SLR1(grammar9)
+    grammar10 = [
+        'S->Aa',
+        'A->BD',
+        'B->b',
+        'D->d'
+    ]
+    fol = FirstAndFollow(grammar10)
+    slr1 = SLR1(grammar10)
     slr1.init()
+    fi , fo = fol.solve()
+    print(fi)
+    print(fo)
+    print(slr1.first)
+    print(slr1.follow)
     # slr1.solve("b")
     # slr1.solve("a+a")
-    # slr1.solve("i+i")
+    # slr1.solve("i+i+(i*i)")
     # slr1.solve("abc") # 7
+    slr1.solve("bda") # 10
