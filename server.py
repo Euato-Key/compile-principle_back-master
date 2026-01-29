@@ -64,7 +64,7 @@ def test():
 
 
 @app.route('/api/LL1Analyse', methods=['POST'])
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 def LL1anlyse():
     data = request.get_json()
     text_list = data.get('inpProductions')
@@ -111,7 +111,7 @@ def LL1anlyse():
 
 
 @app.route('/api/LL1AnalyseInp', methods=['POST'])
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 def LL1AnlyseInp():
     data = request.get_json()
     text_list = data.get('inpProductions')
@@ -127,7 +127,7 @@ def LL1AnlyseInp():
 
 
 @app.route('/api/LR0Analyse', methods=['POST'])
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 def LR0Anlyse():
     data = request.get_json()
     text_list = data.get('inpProductions')
@@ -170,7 +170,7 @@ def LR0Anlyse():
 
 
 @app.route('/api/LR0AnalyseInp', methods=['POST'])
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 def LR0AnlyseInp():
     data = request.get_json()
     text_list = data.get('inpProductions')
@@ -186,7 +186,7 @@ def LR0AnlyseInp():
 
 
 @app.route('/api/SLR1Analyse', methods=['POST'])
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 def SLR1Anlyse():
     data = request.get_json()
     text_list = data.get('inpProductions')
@@ -239,7 +239,7 @@ def SLR1Anlyse():
 
 
 @app.route('/api/SLR1AnalyseInp', methods=['POST'])
-@limiter.limit("10/minute")
+@limiter.limit("1000/minute")
 def SLR1AnlyseInp():
     data = request.get_json()
     text_list = data.get('inpProductions')
@@ -269,7 +269,7 @@ def SLR1AnlyseInp():
 
 
 @app.route('/api/Regex_to_DFAM', methods=['POST'])
-@limiter.limit("30/minute")
+@limiter.limit("3000/minute")
 def Regex_to_DFAM():
     data = request.get_json()
     regex = data.get('inpRegex')
