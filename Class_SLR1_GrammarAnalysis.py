@@ -454,7 +454,7 @@ class SLR1:
         for k in sort_dict.keys():
             if k[1] not in columns:
                 columns.append(k[1])
-        rows = set(key[0] for key in sort_dict.keys())
+        rows = sorted(set(key[0] for key in sort_dict.keys()))
         df = pd.DataFrame(index=rows, columns=columns)
         for key, value in sort_dict.items():
             df.loc[key[0], key[1]] = value
