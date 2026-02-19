@@ -2,3 +2,10 @@
 __pycache__/
 .venv/
 deepseek-api-key.json
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+database/*.db

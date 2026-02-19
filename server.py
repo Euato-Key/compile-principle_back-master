@@ -1,5 +1,5 @@
 from flask_cors import CORS
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -9,6 +9,7 @@ from blueprints.fa import fa_bp
 from blueprints.ll1 import ll1_bp
 from blueprints.lr0 import lr0_bp
 from blueprints.slr1 import slr1_bp
+from blueprints.stats import stats_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -19,6 +20,7 @@ app.register_blueprint(fa_bp)
 app.register_blueprint(ll1_bp)
 app.register_blueprint(lr0_bp)
 app.register_blueprint(slr1_bp)
+app.register_blueprint(stats_bp)
 
 # ================= 反爬核心配置 =================
 def get_real_ip():
