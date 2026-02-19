@@ -488,3 +488,198 @@ class StatsService:
             }
         finally:
             conn.close()
+
+    @staticmethod
+    def delete_by_date_range(start_date: str, end_date: str, module: Optional[str] = None) -> Dict[str, Any]:
+        """删除指定日期范围的数据
+        
+        Args:
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+            module: 模块名称（可选，不传则删除所有模块）
+        """
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            conditions = ["date(record_created_at) >= ?", "date(record_created_at) <= ?"]
+            params = [start_date, end_date]
+            
+            if module:
+                if module not in MODULES:
+                    return {"success": False, "msg": f"无效的模块: {module}"}
+                conditions.append("module = ?")
+                params.append(module)
+            
+            where_clause = "WHERE " + " AND ".join(conditions)
+            
+            # 先查询要删除的记录数
+            cursor.execute(f'SELECT COUNT(*) as count FROM error_statistics {where_clause}', params)
+            count = cursor.fetchone()["count"]
+            
+            # 删除数据
+            cursor.execute(f'DELETE FROM error_statistics {where_clause}', params)
+            cursor.execute(f'DELETE FROM daily_summary {where_clause}', params)
+            conn.commit()
+            
+            module_msg = f"模块 {module} 的" if module else "所有模块的"
+            return {
+                "success": True,
+                "msg": f"已删除 {module_msg} {start_date} 至 {end_date} 的 {count} 条记录"
+            }
+        except Exception as e:
+            conn.rollback()
+            return {
+                "success": False,
+                "msg": f"删除失败: {str(e)}"
+            }
+        finally:
+            conn.close()
+
+    @staticmethod
+    def export_data(start_date: Optional[str] = None, end_date: Optional[str] = None, module: Optional[str] = None) -> Dict[str, Any]:
+        """导出数据为 SQL 格式
+        
+        Args:
+            start_date: 开始日期 YYYY-MM-DD（可选）
+            end_date: 结束日期 YYYY-MM-DD（可选）
+            module: 模块名称（可选）
+        
+        Returns:
+            SQL 格式的数据导出
+        """
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # 构建查询条件
+            conditions = []
+            params = []
+            
+            if start_date:
+                conditions.append("date(record_created_at) >= ?")
+                params.append(start_date)
+            
+            if end_date:
+                conditions.append("date(record_created_at) <= ?")
+                params.append(end_date)
+            
+            if module:
+                conditions.append("module = ?")
+                params.append(module)
+            
+            where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+            
+            # 查询数据
+            query = f'''
+                SELECT record_id, module, step, error_type, error_count, record_created_at, created_at
+                FROM error_statistics
+                {where_clause}
+                ORDER BY created_at DESC
+            '''
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            # 生成 SQL 插入语句
+            sql_lines = [
+                "-- 编译原理学习平台 - 统计数据备份",
+                f"-- 导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"-- 记录数: {len(rows)}",
+                "",
+                "BEGIN TRANSACTION;",
+                "",
+                "-- 创建表（如果不存在）",
+                """CREATE TABLE IF NOT EXISTS error_statistics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    record_id TEXT NOT NULL,
+                    module TEXT NOT NULL,
+                    step TEXT NOT NULL,
+                    error_type TEXT NOT NULL,
+                    error_count INTEGER NOT NULL DEFAULT 1,
+                    record_created_at TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(record_id, module, step, error_type)
+                );""",
+                "",
+                "-- 插入数据",
+            ]
+            
+            for row in rows:
+                sql_lines.append(f"""INSERT OR REPLACE INTO error_statistics 
+                    (record_id, module, step, error_type, error_count, record_created_at, created_at) 
+                    VALUES ('{row['record_id']}', '{row['module']}', '{row['step']}', '{row['error_type']}', 
+                    {row['error_count']}, '{row['record_created_at']}', '{row['created_at']}');""")
+            
+            sql_lines.extend([
+                "",
+                "COMMIT;",
+                ""
+            ])
+            
+            return {
+                "success": True,
+                "msg": f"成功导出 {len(rows)} 条记录",
+                "data": {
+                    "count": len(rows),
+                    "sql": "\n".join(sql_lines)
+                }
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "msg": f"导出失败: {str(e)}"
+            }
+        finally:
+            conn.close()
+
+    @staticmethod
+    def import_data(sql_content: str) -> Dict[str, Any]:
+        """从 SQL 文件恢复数据
+        
+        Args:
+            sql_content: SQL 文件内容
+        
+        Returns:
+            恢复结果
+        """
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # 解析 INSERT 语句
+            import re
+            insert_pattern = r"INSERT OR REPLACE INTO error_statistics.*?VALUES \((.*?)\);"
+            matches = re.findall(insert_pattern, sql_content, re.DOTALL)
+            
+            if not matches:
+                return {"success": False, "msg": "未找到有效的数据插入语句"}
+            
+            success_count = 0
+            fail_count = 0
+            
+            for match in matches:
+                try:
+                    # 执行插入语句
+                    cursor.execute(f"INSERT OR REPLACE INTO error_statistics (record_id, module, step, error_type, error_count, record_created_at, created_at) VALUES ({match})")
+                    success_count += 1
+                except Exception:
+                    fail_count += 1
+            
+            conn.commit()
+            
+            return {
+                "success": True,
+                "msg": f"数据恢复完成: 成功 {success_count} 条, 失败 {fail_count} 条",
+                "data": {
+                    "success_count": success_count,
+                    "fail_count": fail_count
+                }
+            }
+        except Exception as e:
+            conn.rollback()
+            return {
+                "success": False,
+                "msg": f"恢复失败: {str(e)}"
+            }
+        finally:
+            conn.close()

@@ -283,6 +283,114 @@ def delete_module_data(module):
         }), 400
 
 
+@stats_bp.route('/delete/by-date', methods=['POST'])
+def delete_by_date_range():
+    """删除指定日期范围的数据
+    
+    请求体:
+    {
+        "start_date": "2025-01-01",
+        "end_date": "2025-02-20",
+        "module": "lr0"  // 可选，不传则删除所有模块
+    }
+    """
+    data = request.get_json()
+    
+    if 'start_date' not in data or 'end_date' not in data:
+        return jsonify({
+            "code": 400,
+            "msg": "缺少必填字段: start_date, end_date"
+        }), 400
+    
+    result = StatsService.delete_by_date_range(
+        start_date=data['start_date'],
+        end_date=data['end_date'],
+        module=data.get('module')
+    )
+    
+    if result['success']:
+        return jsonify({
+            "code": 0,
+            "msg": result['msg']
+        }), 200
+    else:
+        return jsonify({
+            "code": 400,
+            "msg": result['msg']
+        }), 400
+
+
+@stats_bp.route('/export', methods=['GET'])
+def export_data():
+    """导出数据为 SQL 格式
+    
+    查询参数:
+    - start_date: 开始日期 YYYY-MM-DD（可选）
+    - end_date: 结束日期 YYYY-MM-DD（可选）
+    - module: 模块名称（可选）
+    """
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    module = request.args.get('module')
+    
+    # 验证模块
+    if module and module not in MODULES:
+        return jsonify({
+            "code": 400,
+            "msg": f"无效的模块: {module}"
+        }), 400
+    
+    result = StatsService.export_data(
+        start_date=start_date,
+        end_date=end_date,
+        module=module
+    )
+    
+    if result['success']:
+        return jsonify({
+            "code": 0,
+            "msg": result['msg'],
+            "data": result['data']
+        }), 200
+    else:
+        return jsonify({
+            "code": 500,
+            "msg": result['msg']
+        }), 500
+
+
+@stats_bp.route('/import', methods=['POST'])
+def import_data():
+    """从 SQL 文件恢复数据
+    
+    请求体:
+    {
+        "sql_content": "SQL文件内容..."
+    }
+    """
+    data = request.get_json()
+    
+    if 'sql_content' not in data:
+        return jsonify({
+            "code": 400,
+            "msg": "缺少必填字段: sql_content"
+        }), 400
+    
+    result = StatsService.import_data(sql_content=data['sql_content'])
+    
+    if result['success']:
+        return jsonify({
+            "code": 0,
+            "msg": result['msg'],
+            "data": result['data']
+        }), 200
+    else:
+        return jsonify({
+            "code": 400,
+            "msg": result['msg']
+        }), 400
+
+
 # ==================== 配置查询接口 ====================
 
 @stats_bp.route('/config/modules', methods=['GET'])

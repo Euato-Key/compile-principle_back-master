@@ -112,10 +112,30 @@ def init_database():
         CREATE INDEX IF NOT EXISTS idx_summary_module_step 
         ON daily_summary(module, step)
     ''')
-    
+
+    # 创建系统配置表（存储 API Key 和管理员密码）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            api_key TEXT NOT NULL DEFAULT '',
+            admin_password_hash TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 创建配置更新触发器
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS update_system_config_timestamp
+        AFTER UPDATE ON system_config
+        BEGIN
+            UPDATE system_config SET updated_at = CURRENT_TIMESTAMP WHERE id = 1;
+        END
+    ''')
+
     conn.commit()
     conn.close()
-    
+
     print(f"[Database] 数据库初始化完成: {DATABASE_PATH}")
 
 
