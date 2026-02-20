@@ -5,10 +5,10 @@ flask-limiter==3.11.0
 limits==4.2
 markdown-it-py==3.0.0
 mdurl==0.1.2
-numpy
+numpy>=1.24.0
 ordered-set==4.1.0
 packaging==24.2
-pandas
+pandas>=2.0.0
 pygments==2.19.1
 python-dateutil==2.9.0.post0
 graphviz==0.20.3
@@ -17,10 +17,10 @@ rich==13.9.4
 six==1.16.0
 typing-extensions==4.12.2
 wrapt==1.17.2
-requests
-# 生产服务器依赖
-gunicorn==23.0.0
-gevent==24.2.1
-greenlet==3.0.3
-zope.event==5.0
-zope.interface==6.4
+requests>=2.31.0
+# 生产服务器依赖，仅在linux/Unix环境下可用
+# gunicorn==23.0.0
+# gevent==24.2.1
+# greenlet==3.0.3
+# zope.event==5.0
+# zope.interface==6.4
