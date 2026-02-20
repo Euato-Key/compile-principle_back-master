@@ -51,7 +51,8 @@ daemon = False
 pidfile = "gunicorn.pid"
 
 # 预加载应用（节省内存）
-preload_app = True
+# 注意：设置为 True 可能导致 gevent + requests 出现递归深度错误
+preload_app = False
 
 # 工作模式配置
 def post_fork(server, worker):
