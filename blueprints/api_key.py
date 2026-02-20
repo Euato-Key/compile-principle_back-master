@@ -4,10 +4,48 @@ API密钥管理蓝图
 """
 from flask import Blueprint, request, jsonify
 import hashlib
+import requests
 from database import get_db_connection
 
 api_key_bp = Blueprint('api_key', __name__, url_prefix='/api')
 
+
+def _validate_api_key(api_key: str) -> tuple[bool, str]:
+    """验证 API 密钥是否有效
+
+    通过调用 DeepSeek 余额查询接口验证密钥
+
+    Returns:
+        (is_valid, error_message)
+    """
+    if not api_key or not api_key.startswith('sk-'):
+        return False, "API 密钥格式不正确，应以 'sk-' 开头"
+
+    try:
+        response = requests.get(
+            'https://api.deepseek.com/user/balance',
+            headers={
+                'Accept': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            },
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            return True, ""
+        elif response.status_code == 401:
+            return False, "API 密钥无效或已过期"
+        else:
+            error_data = response.json() if response.text else {}
+            error_msg = error_data.get('error', {}).get('message', f'验证失败 (HTTP {response.status_code})')
+            return False, error_msg
+
+    except requests.exceptions.Timeout:
+        return False, "验证超时，请检查网络连接"
+    except requests.exceptions.RequestException as e:
+        return False, f"网络错误: {str(e)}"
+    except Exception as e:
+        return False, f"验证失败: {str(e)}"
 
 def _hash_password(password: str) -> str:
     """对密码进行哈希处理"""
@@ -104,9 +142,23 @@ def save_api_config(api_key: str = None, admin_password: str = None):
         conn.close()
 
 
+def _mask_api_key(api_key: str) -> str:
+    """对API密钥进行掩码处理
+
+    例如: sk-abc1234567890xyz → sk-abc1...xyz9
+    """
+    if not api_key:
+        return "未配置"
+    if len(api_key) < 12:
+        # 密钥太短，只显示前3位
+        return api_key[:3] + "..."
+    # 显示前6位和后4位，中间用...代替
+    return api_key[:6] + "..." + api_key[-4:]
+
+
 @api_key_bp.route('/getApiKey', methods=['GET'])
 def get_api_key():
-    """获取API密钥（需要密码验证）"""
+    """获取API密钥（需要密码验证）- 返回掩码版本，防止泄露"""
     password = request.headers.get('X-Admin-Password')
     if not password:
         return jsonify({
@@ -121,17 +173,20 @@ def get_api_key():
             "msg": "密码错误"
         }), 403
 
+    # 返回掩码版本的API密钥，防止在响应中泄露完整密钥
+    masked_key = _mask_api_key(config.get('api_key', ''))
+
     return jsonify({
         "code": 0,
         "data": {
-            "api_key": config.get('api_key', '')
+            "api_key": masked_key
         }
     }), 200
 
 
 @api_key_bp.route('/updateApiKey', methods=['POST'])
 def update_api_key():
-    """更新API密钥（需要密码验证）"""
+    """更新API密钥（需要密码验证，会先验证密钥有效性）"""
     data = request.get_json()
     if not data:
         return jsonify({
@@ -141,7 +196,6 @@ def update_api_key():
 
     old_password = data.get('old_password')
     new_api_key = data.get('new_api_key')
-    new_password = data.get('new_password')  # 可选：同时修改密码
 
     if not old_password:
         return jsonify({
@@ -164,14 +218,21 @@ def update_api_key():
             "msg": "原密码错误"
         }), 403
 
+    # 验证新 API 密钥有效性
+    is_valid, error_msg = _validate_api_key(new_api_key)
+    if not is_valid:
+        return jsonify({
+            "code": 400,
+            "msg": f"API 密钥验证失败: {error_msg}"
+        }), 400
+
     # 更新配置
-    if save_api_config(api_key=new_api_key, admin_password=new_password):
+    if save_api_config(api_key=new_api_key):
         return jsonify({
             "code": 0,
             "msg": "API密钥更新成功",
             "data": {
-                "api_key_updated": True,
-                "password_updated": bool(new_password)
+                "api_key_updated": True
             }
         }), 200
     else:

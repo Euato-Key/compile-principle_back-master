@@ -133,6 +133,35 @@ def init_database():
         END
     ''')
 
+    # 创建 Token 用量统计表（简化版）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS token_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            module TEXT NOT NULL DEFAULT 'unknown',
+            model TEXT NOT NULL DEFAULT 'deepseek-chat',
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 创建 Token 用量索引
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_token_usage_module 
+        ON token_usage(module)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_token_usage_created 
+        ON token_usage(created_at)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_token_usage_module_created 
+        ON token_usage(module, created_at)
+    ''')
+
     conn.commit()
     conn.close()
 

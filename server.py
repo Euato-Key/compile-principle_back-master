@@ -10,6 +10,7 @@ from blueprints.ll1 import ll1_bp
 from blueprints.lr0 import lr0_bp
 from blueprints.slr1 import slr1_bp
 from blueprints.stats import stats_bp
+from blueprints.ai_proxy import ai_proxy_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -21,6 +22,7 @@ app.register_blueprint(ll1_bp)
 app.register_blueprint(lr0_bp)
 app.register_blueprint(slr1_bp)
 app.register_blueprint(stats_bp)
+app.register_blueprint(ai_proxy_bp)
 
 # ================= 反爬核心配置 =================
 def get_real_ip():
