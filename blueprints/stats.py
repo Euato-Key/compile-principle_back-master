@@ -440,11 +440,11 @@ def get_db_status():
         total_records = cursor.fetchone()["total"]
         
         # 最早的记录日期
-        cursor.execute('SELECT MIN(date(record_created_at)) as min_date FROM error_statistics')
+        cursor.execute('SELECT MIN(datetime(record_created_at)) as min_date FROM error_statistics')
         min_date = cursor.fetchone()["min_date"]
         
         # 最晚的记录日期
-        cursor.execute('SELECT MAX(date(record_created_at)) as max_date FROM error_statistics')
+        cursor.execute('SELECT MAX(datetime(record_created_at)) as max_date FROM error_statistics')
         max_date = cursor.fetchone()["max_date"]
         
         # 各模块记录数

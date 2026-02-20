@@ -324,7 +324,7 @@ class StatsService:
         
         query = f'''
             SELECT 
-                date(record_created_at) as day,
+                datetime(record_created_at) as day,
                 SUM(error_count) as daily_errors,
                 COUNT(DISTINCT record_id) as daily_records
             FROM error_statistics
