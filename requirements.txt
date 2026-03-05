@@ -18,6 +18,7 @@ six==1.16.0
 typing-extensions==4.12.2
 wrapt==1.17.2
 requests>=2.31.0
+openai
 # 生产服务器依赖，仅在linux/Unix环境下可用
 # gunicorn==23.0.0
 # gevent==24.2.1
