@@ -1,30 +1,93 @@
 """
-DeepSeek AI 代理蓝图
-代理前端请求到 DeepSeek API，隐藏 API Key 并统计 Token 用量
+AI 代理蓝图
+支持 DeepSeek 和 Hunyuan 双模型，自动根据余额和策略切换
+使用 OpenAI SDK 调用 API
 """
 from flask import Blueprint, request, jsonify, Response, stream_with_context
-import requests
 import json
 import time
 from datetime import datetime
 from database import get_db_connection
-from blueprints.api_key import load_api_config
+from blueprints.api_key import load_api_config, should_use_deepseek
+from openai import OpenAI
 
 ai_proxy_bp = Blueprint('ai_proxy', __name__, url_prefix='/api')
 
-# DeepSeek API 配置
+# API 配置
 DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
-DEEPSEEK_CHAT_URL = f'{DEEPSEEK_BASE_URL}/chat/completions'
+HUNYUAN_BASE_URL = 'https://api.hunyuan.cloud.tencent.com/v1'
+
+# 模型映射
+DEEPSEEK_MODELS = ['deepseek-chat', 'deepseek-reasoner']
+HUNYUAN_MODELS = ['hunyuan-lite', 'hunyuan-standard', 'hunyuan-standard-256K', 'hunyuan-pro']
 
 
-def get_api_key():
-    """从数据库获取 API Key"""
+def get_deepseek_client():
+    """获取 DeepSeek 客户端"""
     config = load_api_config()
-    return config.get('api_key', '')
+    api_key = config.get('api_key', '')
+    if not api_key:
+        return None
+    return OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
+
+
+def get_hunyuan_client():
+    """获取 Hunyuan 客户端"""
+    config = load_api_config()
+    api_key = config.get('hunyuan_api_key', '')
+    if not api_key:
+        return None
+    return OpenAI(api_key=api_key, base_url=HUNYUAN_BASE_URL)
+
+
+def get_available_client():
+    """获取可用的客户端
+    
+    Returns:
+        (client, provider, reason)
+        client: OpenAI 客户端或 None
+        provider: 'deepseek' 或 'hunyuan'
+        reason: 选择原因
+    """
+    use_deepseek, reason = should_use_deepseek()
+    
+    if use_deepseek:
+        client = get_deepseek_client()
+        if client:
+            return client, 'deepseek', reason
+        # DeepSeek 客户端获取失败，尝试 Hunyuan
+        client = get_hunyuan_client()
+        if client:
+            return client, 'hunyuan', f"{reason}，但 DeepSeek 客户端初始化失败，已切换到 Hunyuan"
+        return None, None, "DeepSeek 和 Hunyuan 都未配置"
+    else:
+        client = get_hunyuan_client()
+        if client:
+            return client, 'hunyuan', reason
+        # Hunyuan 未配置，尝试 DeepSeek
+        client = get_deepseek_client()
+        if client:
+            return client, 'deepseek', f"{reason}，但 Hunyuan 未配置，继续使用 DeepSeek"
+        return None, None, "Hunyuan 和 DeepSeek 都未配置"
+
+
+def convert_model_name(model: str, provider: str) -> str:
+    """转换模型名称
+    
+    如果请求的模型不属于当前 provider，使用默认模型
+    """
+    if provider == 'deepseek':
+        if model in DEEPSEEK_MODELS:
+            return model
+        return 'deepseek-chat'  # 默认 DeepSeek 模型
+    else:  # hunyuan
+        if model in HUNYUAN_MODELS:
+            return model
+        return 'hunyuan-lite'  # 默认 Hunyuan 模型（免费）
 
 
 def record_token_usage(module_type: str, model: str, input_tokens: int, output_tokens: int, 
-                       total_tokens: int, is_stream: bool = False):
+                       total_tokens: int, is_stream: bool = False, provider: str = ''):
     """记录 Token 使用量到数据库"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -34,7 +97,8 @@ def record_token_usage(module_type: str, model: str, input_tokens: int, output_t
             INSERT INTO token_usage 
             (module, model, input_tokens, output_tokens, total_tokens, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (module_type, model, input_tokens, output_tokens, total_tokens, datetime.now()))
+        ''', (f"{module_type}:{provider}" if provider else module_type, 
+              model, input_tokens, output_tokens, total_tokens, datetime.now()))
         conn.commit()
     except Exception as e:
         print(f"[AI Proxy] 记录 Token 用量失败: {e}")
@@ -46,32 +110,26 @@ def record_token_usage(module_type: str, model: str, input_tokens: int, output_t
 def ai_chat():
     """
     代理 AI 聊天请求（非流式）
-    适用于 AI 报告生成等场景
-    
-    请求体示例:
-    {
-        "messages": [...],
-        "model": "deepseek-chat",
-        "temperature": 0.3,
-        "max_tokens": 6000,
-        "response_format": {"type": "json_object"},
-        "module": "fa"  // 可选，用于统计
-    }
+    自动根据策略选择 DeepSeek 或 GLM
     """
-    api_key = get_api_key()
-    if not api_key:
+    client, provider, reason = get_available_client()
+    if not client:
         return jsonify({
             "code": 500,
-            "msg": "API Key 未配置"
+            "msg": "没有可用的 AI 服务"
         }), 500
     
     # 获取前端请求体
     request_data = request.get_json() or {}
-    module = request_data.pop('module', 'unknown')  # 取出 module 用于统计
+    module = request_data.pop('module', 'unknown')
+    requested_model = request_data.get("model", "deepseek-chat")
     
-    # 构建请求体（过滤掉自定义字段）
-    payload = {
-        "model": request_data.get("model", "deepseek-chat"),
+    # 转换模型名称
+    model = convert_model_name(requested_model, provider)
+    
+    # 构建请求参数
+    kwargs = {
+        "model": model,
         "messages": request_data.get("messages", []),
         "temperature": request_data.get("temperature", 0.3),
         "max_tokens": request_data.get("max_tokens", 4096),
@@ -80,49 +138,39 @@ def ai_chat():
     
     # 可选参数
     if "response_format" in request_data:
-        payload["response_format"] = request_data["response_format"]
+        kwargs["response_format"] = request_data["response_format"]
     if "top_p" in request_data:
-        payload["top_p"] = request_data["top_p"]
+        kwargs["top_p"] = request_data["top_p"]
     if "frequency_penalty" in request_data:
-        payload["frequency_penalty"] = request_data["frequency_penalty"]
+        kwargs["frequency_penalty"] = request_data["frequency_penalty"]
     if "presence_penalty" in request_data:
-        payload["presence_penalty"] = request_data["presence_penalty"]
+        kwargs["presence_penalty"] = request_data["presence_penalty"]
     if "thinking" in request_data:
-        payload["thinking"] = request_data["thinking"]
+        kwargs["extra_body"] = {"thinking": request_data["thinking"]}
     
     try:
-        # 发送请求到 DeepSeek
+        # 发送请求
         start_time = time.time()
-        response = requests.post(
-            DEEPSEEK_CHAT_URL,
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}'
-            },
-            json=payload,
-            timeout=120  # 120秒超时
-        )
+        completion = client.chat.completions.create(**kwargs)
         
-        if not response.ok:
-            error_data = response.json() if response.text else {}
-            return jsonify({
-                "code": response.status_code,
-                "msg": error_data.get('error', {}).get('message', f'DeepSeek API 错误: {response.status_code}')
-            }), response.status_code
+        # 转换为字典格式
+        data = completion.model_dump()
         
-        # 解析响应
-        data = response.json()
+        # 添加 provider 信息
+        data['_provider'] = provider
+        data['_switch_reason'] = reason
         
         # 记录 Token 用量
         usage = data.get('usage', {})
         if usage:
             record_token_usage(
                 module_type=module,
-                model=payload["model"],
+                model=model,
                 input_tokens=usage.get('prompt_tokens', 0),
                 output_tokens=usage.get('completion_tokens', 0),
                 total_tokens=usage.get('total_tokens', 0),
-                is_stream=False
+                is_stream=False,
+                provider=provider
             )
         
         # 返回给前端
@@ -131,11 +179,6 @@ def ai_chat():
             "data": data
         }), 200
         
-    except requests.exceptions.Timeout:
-        return jsonify({
-            "code": 504,
-            "msg": "请求超时，请稍后重试"
-        }), 504
     except Exception as e:
         print(f"[AI Proxy] 请求失败: {e}")
         return jsonify({
@@ -148,67 +191,43 @@ def ai_chat():
 def ai_chat_stream():
     """
     代理 AI 聊天请求（流式）
-    适用于 AI 助手实时对话
-    
-    请求体示例:
-    {
-        "messages": [...],
-        "model": "deepseek-chat",
-        "temperature": 0.3,
-        "module": "fa"  // 可选，用于统计
-    }
+    自动根据策略选择 DeepSeek 或 GLM
     """
-    api_key = get_api_key()
-    if not api_key:
+    client, provider, reason = get_available_client()
+    if not client:
         return jsonify({
             "code": 500,
-            "msg": "API Key 未配置"
+            "msg": "没有可用的 AI 服务"
         }), 500
     
     # 获取前端请求体
     request_data = request.get_json() or {}
-    module = request_data.pop('module', 'unknown')  # 取出 module 用于统计
-    model = request_data.get("model", "deepseek-chat")
+    module = request_data.pop('module', 'unknown')
+    requested_model = request_data.get("model", "deepseek-chat")
     
-    # 构建请求体
-    payload = {
+    # 转换模型名称
+    model = convert_model_name(requested_model, provider)
+    
+    # 构建请求参数
+    kwargs = {
         "model": model,
         "messages": request_data.get("messages", []),
         "temperature": request_data.get("temperature", 0.3),
         "max_tokens": request_data.get("max_tokens", 4096),
-        "stream": True  # 强制流式
+        "stream": True
     }
     
     # 可选参数
     if "top_p" in request_data:
-        payload["top_p"] = request_data["top_p"]
+        kwargs["top_p"] = request_data["top_p"]
     if "frequency_penalty" in request_data:
-        payload["frequency_penalty"] = request_data["frequency_penalty"]
+        kwargs["frequency_penalty"] = request_data["frequency_penalty"]
     if "presence_penalty" in request_data:
-        payload["presence_penalty"] = request_data["presence_penalty"]
+        kwargs["presence_penalty"] = request_data["presence_penalty"]
     if "thinking" in request_data:
-        payload["thinking"] = request_data["thinking"]
+        kwargs["extra_body"] = {"thinking": request_data["thinking"]}
     
     try:
-        # 发送流式请求到 DeepSeek
-        deepseek_response = requests.post(
-            DEEPSEEK_CHAT_URL,
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}'
-            },
-            json=payload,
-            stream=True,
-            timeout=300  # 流式请求更长超时
-        )
-        
-        if not deepseek_response.ok:
-            error_data = deepseek_response.json() if deepseek_response.text else {}
-            return jsonify({
-                "code": deepseek_response.status_code,
-                "msg": error_data.get('error', {}).get('message', f'DeepSeek API 错误: {deepseek_response.status_code}')
-            }), deepseek_response.status_code
-        
         # 用于统计的变量
         total_input_tokens = 0
         total_output_tokens = 0
@@ -216,25 +235,34 @@ def ai_chat_stream():
         def generate():
             nonlocal total_input_tokens, total_output_tokens
             
-            for chunk in deepseek_response.iter_content(chunk_size=1024):
-                if chunk:
-                    # 尝试解析 chunk 获取 usage 信息
-                    try:
-                        lines = chunk.decode('utf-8').strip().split('\n')
-                        for line in lines:
-                            if line.startswith('data: '):
-                                data_str = line[6:]  # 去掉 "data: "
-                                if data_str == '[DONE]':
-                                    continue
-                                data = json.loads(data_str)
-                                usage = data.get('usage')
-                                if usage:
-                                    total_input_tokens = usage.get('prompt_tokens', 0)
-                                    total_output_tokens = usage.get('completion_tokens', 0)
-                    except:
-                        pass
-                    
-                    yield chunk
+            # 发送流式请求
+            stream = client.chat.completions.create(**kwargs)
+            
+            # 发送 provider 信息（作为第一个 chunk）
+            provider_info = {
+                "_provider": provider,
+                "_switch_reason": reason,
+                "_model": model,
+                "choices": [{"delta": {"content": ""}}]
+            }
+            yield f"data: {json.dumps(provider_info, ensure_ascii=False)}\n\n".encode('utf-8')
+            
+            for chunk in stream:
+                # 转换为字典
+                chunk_dict = chunk.model_dump()
+                
+                # 尝试获取 usage 信息
+                usage = chunk_dict.get('usage')
+                if usage:
+                    total_input_tokens = usage.get('prompt_tokens', 0)
+                    total_output_tokens = usage.get('completion_tokens', 0)
+                
+                # 格式化为 SSE 格式
+                data_str = json.dumps(chunk_dict, ensure_ascii=False)
+                yield f"data: {data_str}\n\n".encode('utf-8')
+            
+            # 发送结束标记
+            yield b"data: [DONE]\n\n"
             
             # 流结束后记录 Token 用量
             if total_input_tokens > 0 or total_output_tokens > 0:
@@ -244,7 +272,8 @@ def ai_chat_stream():
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
                     total_tokens=total_input_tokens + total_output_tokens,
-                    is_stream=True
+                    is_stream=True,
+                    provider=provider
                 )
         
         return Response(
@@ -256,11 +285,6 @@ def ai_chat_stream():
             }
         )
         
-    except requests.exceptions.Timeout:
-        return jsonify({
-            "code": 504,
-            "msg": "请求超时，请稍后重试"
-        }), 504
     except Exception as e:
         print(f"[AI Proxy] 流式请求失败: {e}")
         return jsonify({
@@ -278,12 +302,32 @@ def get_available_models():
             {
                 "id": "deepseek-chat",
                 "name": "DeepSeek Chat",
-                "description": "通用对话模型"
+                "description": "通用对话模型 (DeepSeek)"
             },
             {
                 "id": "deepseek-reasoner",
                 "name": "DeepSeek Reasoner",
-                "description": "推理模型，支持 thinking 模式"
+                "description": "推理模型，支持 thinking 模式 (DeepSeek)"
+            },
+            {
+                "id": "hunyuan-lite",
+                "name": "Hunyuan Lite",
+                "description": "轻量快速模型，免费 (Hunyuan)"
+            },
+            {
+                "id": "hunyuan-standard",
+                "name": "Hunyuan Standard",
+                "description": "标准对话模型 (Hunyuan)"
+            },
+            {
+                "id": "hunyuan-standard-256K",
+                "name": "Hunyuan Standard 256K",
+                "description": "长上下文模型 (Hunyuan)"
+            },
+            {
+                "id": "hunyuan-pro",
+                "name": "Hunyuan Pro",
+                "description": "专业版模型 (Hunyuan)"
             }
         ]
     }), 200
@@ -293,11 +337,6 @@ def get_available_models():
 def get_token_usage():
     """
     获取 Token 使用统计
-    
-    查询参数:
-    - start_date: 开始日期 (YYYY-MM-DD)
-    - end_date: 结束日期 (YYYY-MM-DD)
-    - module: 模块筛选 (可选)
     """
     from datetime import datetime, timedelta
     
@@ -354,7 +393,7 @@ def get_token_usage():
         
         module_stats = [dict(row) for row in cursor.fetchall()]
         
-        # 查询按日期统计（最近 30 天）
+        # 查询按日期统计
         cursor.execute(f'''
             SELECT 
                 DATE(created_at) as date,
@@ -415,9 +454,13 @@ def get_token_usage():
 @ai_proxy_bp.route('/ai/balance', methods=['GET'])
 def get_balance_proxy():
     """
-    代理查询 DeepSeek 余额（后端发起请求，保护 API Key）
+    代理查询 DeepSeek 余额
     """
-    api_key = get_api_key()
+    import requests
+    
+    config = load_api_config()
+    api_key = config.get('api_key', '')
+    
     if not api_key:
         return jsonify({
             "code": 500,
@@ -458,3 +501,24 @@ def get_balance_proxy():
             "code": 500,
             "msg": f"查询失败: {str(e)}"
         }), 500
+
+
+@ai_proxy_bp.route('/ai/provider', methods=['GET'])
+def get_current_provider():
+    """获取当前使用的 AI 提供商信息"""
+    client, provider, reason = get_available_client()
+    
+    if not client:
+        return jsonify({
+            "code": 500,
+            "msg": "没有可用的 AI 服务"
+        }), 500
+    
+    return jsonify({
+        "code": 0,
+        "data": {
+            "provider": provider,
+            "reason": reason,
+            "available_providers": []
+        }
+    }), 200
